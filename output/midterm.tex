@@ -1,4 +1,4 @@
-\documentclass [11pt]{article}
+\documentclass[11pt]{article}
 \usepackage{longtable}
 \usepackage{amsmath,float,epsfig,amssymb,graphicx}
 \usepackage{fancyhdr,subfigure}
@@ -22,9 +22,9 @@
 \setlength{\headheight}{14pt}
 
 %Author & Project/Homework names
-\newcommand{\authorname}{[First Name] [Last Name]}
-\newcommand{\datenumber}{10/30/24}
-\newcommand{\assignmentID}{Midterm 2024}
+\newcommand{\authorname}{Christopher Luey}
+\newcommand{\datenumber}{11/01/25}
+\newcommand{\assignmentID}{Midterm 2025}
 \newcommand{\coursename}{Principles of Robot Autonomy I: }
 
 %%%%%%%%%%%%%%%%%% DOCUMENT HEADER & TITLE %%%%%%%%%%%%%%%%%%
@@ -43,67 +43,705 @@
 %%%%%%%%%%%%%%%% EXAM %%%%%%%%%%%%%%%%%%%%
 
 \section*{Problem 1}
-    \begin{enumerate}[label=(\roman*)]
-        \item \textbf{Planar Quadrotor Dynamics Implementation}\\
-        I completed the continuous-time state transition function $f_{c}(x,u)$ in the notebook cell reserved for Part~1a by encoding the six coupled first-order differential equations shown in the problem statement. The state vector $x=[p_x,\,v_x,\,p_y,\,v_y,\,\phi,\,\omega]^\top$ and control input $u=[T_1,\,T_2]^\top$ are unpacked explicitly so that each term in the dynamics can be constructed directly from the physical parameters already defined in the notebook. The implementation forms the total thrust $T_1+T_2$ once (stored in `thrust_sum`) to reuse in both translational accelerations. The derivatives are then populated component-wise inside a NumPy array that matches the input state dimensionality: position rates are set to the corresponding velocities ($\dot{p}_x=v_x$ and $\dot{p}_y=v_y$), the horizontal acceleration is $-\frac{T_1+T_2}{m}\sin\phi$, the vertical acceleration is $\frac{T_1+T_2}{m}\cos\phi-g$, the attitude rate is the body rate $\omega$, and the angular acceleration is $\frac{(T_2-T_1)\ell}{I_{zz}}$. Creating the derivative vector this way guarantees numerical consistency with the notebook's vectorized operations and keeps the implementation aligned with the provided constants $m$, $g$, $\ell$, and $I_{zz}$.
-
-        Building on $f_{c}$, the discrete-time update $f_{d}(x,u,\Delta t)$ applies the forward-Euler integration rule requested in the prompt. Rather than duplicating any physics, the code simply returns $x + \Delta t \cdot f_{c}(x,u)$ so that it automatically stays synchronized with any future refinement of the continuous model and respects the default step size $\Delta t=0.02$\,s supplied by `dt_default`. I verified that the function retains the input shape and supports arbitrary user-specified time steps through the optional `dt` parameter. The exact code used to implement both functions is reproduced verbatim in Appendix~\ref{appendix:problem1a-code}, where it is automatically exported from the notebook to avoid transcription errors.
-        \item
-        \item
+    \begin{enumerate}[label=(\alph*)]
+        \item \textbf{Planar Quadrotor Dynamics Implementation.}
+        The continuous-time model $f_c(x,u)$ unpacks $x=[p_x,v_x,p_y,v_y,\phi,\omega]^\top$ and $u=[T_1,T_2]^\top$. It sets $\dot{p}_x=v_x$ and $\dot{p}_y=v_y$, then applies the given equations to compute $\dot{v}_x=-(T_1+T_2)\sin\phi/m$, $\dot{v}_y=(T_1+T_2)\cos\phi/m-g$, $\dot{\phi}=\omega$, and $\dot{\omega}=(T_2-T_1)\ell/I_{zz}$. The result is returned as a NumPy array that matches the state dimension. The notebook implementation exported to Appendix~\ref{appendix:a1-dynamics} provides the full code listing.
+        
+        The discrete update $f_d(x,u,\Delta t)$ uses the requested forward Euler step $x+\Delta t\,f_c(x,u)$. This keeps the discrete model consistent with the continuous dynamics for any $\Delta t$ (default $0.02$\,s); the corresponding code appears in Appendix~\ref{appendix:a1-dynamics}.
+        \item \textbf{Running Cost Specialization.}
+        With diagonal weights $Q=\operatorname{diag}(q_p,q_v,q_p,q_v,q_\phi,q_\omega)$ and $R=r_T I_2$, the per-step cost for the hover equilibrium $x^\star=[1.5,0,1.0,0,0,0]^\top$, $u^\star=[T_{\text{hov}},T_{\text{hov}}]^\top$, $T_{\text{hov}}=mg/2$ is
+        \[
+        \ell(x_t,u_t)=q_p(p_x-1.5)^2+q_v v_x^2+q_p(p_y-1.0)^2+q_v v_y^2+q_\phi\phi^2+q_\omega\omega^2+r_T\bigl[(T_1-T_{\text{hov}})^2+(T_2-T_{\text{hov}})^2\bigr].
+        \]
+        This scalar form is implemented in the \texttt{running\_cost} helper whose source is captured in Appendix~\ref{appendix:a2-running-cost}.
+        \item \textbf{Linearization about a Reference Trajectory.}
+        \subsubsection*{(i) Continuous and Discrete Jacobians}
+        Differentiating $f_c$ component-wise yields the continuous Jacobians
+        \[
+        A_c(x,u)=\frac{\partial f_c}{\partial x}=
+        \begin{bmatrix}
+        0 & 1 & 0 & 0 & 0 & 0\\
+        0 & 0 & 0 & 0 & -\tfrac{T_1+T_2}{m}\cos\phi & 0\\
+        0 & 0 & 0 & 1 & 0 & 0\\
+        0 & 0 & 0 & 0 & -\tfrac{T_1+T_2}{m}\sin\phi & 0\\
+        0 & 0 & 0 & 0 & 0 & 1\\
+        0 & 0 & 0 & 0 & 0 & 0
+        \end{bmatrix},\quad
+        B_c(x,u)=\frac{\partial f_c}{\partial u}=
+        \begin{bmatrix}
+        0 & 0\\
+        -\tfrac{\sin\phi}{m} & -\tfrac{\sin\phi}{m}\\
+        0 & 0\\
+        \tfrac{\cos\phi}{m} & \tfrac{\cos\phi}{m}\\
+        0 & 0\\
+        -\tfrac{\ell}{I_{zz}} & \tfrac{\ell}{I_{zz}}
+        \end{bmatrix}.
+        \]
+        Forward Euler converts these to discrete Jacobians at $(x_t^{\text{ref}},u_t^{\text{ref}})$ via $A_t = I + \Delta t\,A_c(x_t^{\text{ref}},u_t^{\text{ref}})$ and $B_t = \Delta t\,B_c(x_t^{\text{ref}},u_t^{\text{ref}})$. The corresponding code used by both controllers is listed in Appendix~\ref{appendix:ac1-jacobians}.
+        
+        \subsubsection*{(ii) Affine Linearization Form}
+        Substituting the Jacobians above into $f_d(x,u) = x + \Delta t\,f_c(x,u)$ and expanding about $(x_t^{\text{ref}},u_t^{\text{ref}})$ gives
+        \[
+        x_{t+1} \approx f_d(x_t^{\text{ref}},u_t^{\text{ref}}) + A_t\,(x_t - x_t^{\text{ref}}) + B_t\,(u_t - u_t^{\text{ref}}),
+        \]
+        which matches the deviation form $\delta x_{t+1} = A_t\,\delta x_t + B_t\,\delta u_t$. The algebraic steps are summarized in Appendix~\ref{appendix:ac2-affine}.
+        
+        \subsubsection*{(iii) Linearization Helper Implementation}
+        The helper \texttt{linearize\_about} calls the analytic routines above, returning $(A_t,B_t)$ together with $f_d(x_t^{\text{ref}},u_t^{\text{ref}})$ for use by both iLQR and GS-LQR; see Appendix~\ref{appendix:ac3-linearize} for the exported source.
+        
+        \item \textbf{Interpreting Results: iLQR vs. GS-LQR.}
+        Both controllers were tested on ``real-world'' dynamics that incorporate hidden thrust scaling errors (actuator miscalibration) and acceleration biases (unmodeled disturbances), simulating realistic model mismatch. The generated trajectories, time histories, and cost convergence plots are shown in Figures~\ref{fig:ilqr-trajectory}--\ref{fig:planar-comparison} in Appendix~\ref{appendix:a-figures}.
+        
+        \subsubsection*{(i) Trajectory Shape Comparison}
+        The planar trajectory comparison (Figure~\ref{fig:planar-comparison}) reveals a dramatic performance difference. The GS-LQR controller (blue) successfully navigates from the origin to approximately $(1.5\,\text{m}, 1.0\,\text{m})$, reaching the goal marker via a smooth, curved path. In contrast, the iLQR trajectory (red) catastrophically diverges to $(20\,\text{m}, -16\,\text{m})$---far beyond the intended goal.
+        
+        Examining the time-series plots clarifies this failure. The iLQR roll angle $\phi$ monotonically decreases from $0^\circ$ to $-270^\circ$ (Figure~\ref{fig:ilqr-trajectory}), indicating continuous rotation in one direction due to persistent control asymmetry under model mismatch. Meanwhile, GS-LQR shows an initial dip to approximately $-45^\circ$ before recovering, then maintaining $\phi$ within roughly $-5^\circ$ to $+30^\circ$ with a peak around $t=1\,\text{s}$ (Figure~\ref{fig:gslqr-trajectory}). The fundamental difference: GS-LQR employs closed-loop feedback that corrects for model errors at each timestep, whereas iLQR executes its pre-computed control sequence open-loop with no error correction. Consequently, accumulated model mismatch destroys the iLQR trajectory.
+        
+        \subsubsection*{(ii) Cost and Control Effort}
+        The total closed-loop rollout costs confirm the performance gap:
+        \begin{itemize}
+            \item \textbf{iLQR}: $J = 181{,}377$
+            \item \textbf{GS-LQR}: $J = 1{,}644$ \quad (110$\times$ lower)
+        \end{itemize}
+        
+        Control effort profiles further illustrate the disparity. The iLQR thrusts exhibit violent oscillations in the first $0.5\,\text{s}$, with spikes reaching $\sim 20\,\text{N}$ (four times hover thrust) and one rotor briefly dropping to nearly $0\,\text{N}$. After this initial transient, thrusts settle to a constant $\approx 5\,\text{N}$, but by then the trajectory has already diverged irreparably. In contrast, GS-LQR shows initial transients in the first $0.5\,\text{s}$ with thrusts reaching $10\,\text{N}$ and one rotor briefly dropping near $0\,\text{N}$, but the feedback controller recovers and stabilizes thrusts near hover values $(\approx 5\,\text{N})$ by $t=1\,\text{s}$, maintaining smooth control thereafter. GS-LQR thus achieves dramatically superior tracking accuracy despite both controllers experiencing challenging initial dynamics.
+        
+        \subsubsection*{(iii) Sensitivity to Increased Control Weight}
+        To assess sensitivity to the control penalty $r_T$, both controllers were rerun with $r_T=0.01$ (a tenfold increase from the baseline $0.001$). The resulting trajectories and time histories appear in Figures~\ref{fig:ilqr-highrt}--\ref{fig:planar-highrt} in Appendix~\ref{appendix:a-figures-highrt}.
+        
+        \textbf{Quantitative comparison:}
+        \begin{center}
+        \begin{tabular}{lccc}
+        \hline
+        Controller & $r_T$ & Cost $J$ & Ratio \\
+        \hline
+        iLQR & $0.001$ & $181{,}377$ & --- \\
+        iLQR & $0.01$ & $178{,}994$ & $0.99\times$ \\
+        GS-LQR & $0.001$ & $1{,}644$ & --- \\
+        GS-LQR & $0.01$ & $1{,}648$ & $1.00\times$ \\
+        \hline
+        \end{tabular}
+        \end{center}
+        
+        \textbf{Qualitative observations:}
+        \begin{itemize}
+            \item \textbf{iLQR behavior:} The higher control penalty produces slightly different initial transients (Figure~\ref{fig:ilqr-highrt}), with T2 reaching $20\,\text{N}$ instead of T1, but the open-loop execution still diverges catastrophically under model mismatch. The trajectories are nearly identical---both reach approximately $(20\,\text{m}, -16\,\text{m})$ with $\phi$ decreasing to $-270^\circ$. The cost remains similarly high ($\sim 179\text{k}$ vs.\ $181\text{k}$) because tracking errors dominate, not control effort.
+            
+            \item \textbf{GS-LQR robustness:} The closed-loop GS-LQR cost is nearly unchanged ($1{,}644$ vs.\ $1{,}648$), demonstrating that the feedback controller already operates efficiently. Comparing Figures~\ref{fig:gslqr-trajectory} and~\ref{fig:gslqr-highrt}, the trajectories are nearly indistinguishable: both reach $(1.5\,\text{m}, 1.0\,\text{m})$ with similar transient behavior. The initial thrust spikes are similar in both cases, and steady-state thrusts remain near $5\,\text{N}$. The attitude profiles show similar transients (dip to $-40^\circ$, peak at $+25-30^\circ$), indicating minimal sensitivity to the control weight.
+            
+            \item \textbf{Key insight:} When a controller successfully tracks the reference (GS-LQR), increasing $r_T$ has minimal impact because the feedback naturally keeps the system near equilibrium, making control effort inherently small. When tracking fails catastrophically (iLQR), the cost is dominated by state errors (position and attitude divergence), not control effort, so $r_T$ changes have negligible effect on total cost. The figures visually confirm these trajectories are essentially unchanged despite the tenfold increase in control penalty.
+        \end{itemize}
+        
+        Overall, this sensitivity study confirms that \emph{feedback} is the critical factor for robustness under model mismatch, while control penalty tuning is a secondary consideration that primarily affects maneuver aggressiveness in well-performing controllers.
     \end{enumerate}
 
 \newpage
 \section*{Problem 2}
-    \begin{enumerate}[label=(\roman*)]
-        \item  
-        \item
-        \item  
-        \item
-        \item 
+    \begin{enumerate}[label=(\alph*)]
+        \item \textbf{Position of the calibration board in the world frame.}
+        
+        We are given the following coordinate frame specifications:
+        \begin{itemize}
+            \item \textbf{World frame $W$}: Origin at ground level with $\hat{z}_W$ pointing upwards and $\hat{x}_W$, $\hat{y}_W$ across the ground (right-hand rule).
+            \item \textbf{Camera frame $C$}: Origin 30\,cm above $W$'s origin. The camera's $\hat{x}_C$ points directly downwards, $\hat{y}_C$ points to the camera's left, and $\hat{z}_C$ points out from the lens (parallel to $\hat{x}_W$).
+            \item \textbf{Board frame $B$ (in camera coordinates)}: Located at 0\,cm in $C$'s $x$ axis, 20\,cm in $C$'s $y$ axis, and 100\,cm in $C$'s $z$ axis.
+        \end{itemize}
+        
+        \textbf{Step 1: Rotation matrix from $C$ to $W$.}
+        
+        From the orientation constraints:
+        \begin{itemize}
+            \item $\hat{z}_C$ is parallel to $\hat{x}_W$ $\Rightarrow$ $\hat{x}_W = \hat{z}_C$
+            \item $\hat{x}_C$ points downwards $\Rightarrow$ $\hat{z}_W = -\hat{x}_C$
+            \item By the right-hand rule: $\hat{y}_W = \hat{y}_C$
+        \end{itemize}
+        
+        The rotation matrix $R_{WC}$ (expressing $C$'s axes in $W$) is:
+        \[
+        R_{WC} = 
+        \begin{bmatrix}
+        0 & 0 & 1 \\
+        0 & 1 & 0 \\
+        -1 & 0 & 0
+        \end{bmatrix}
+        \]
+        
+        \textbf{Step 2: Position transformation.}
+        
+        The position of the camera origin in $W$ is:
+        \[
+        p_{WC} = \begin{bmatrix} 0 \\ 0 \\ 0.3 \end{bmatrix}\,\text{m}
+        \]
+        
+        The position of the board origin in $C$ is:
+        \[
+        p_{CB} = \begin{bmatrix} 0 \\ 0.2 \\ 1.0 \end{bmatrix}\,\text{m}
+        \]
+        
+        The position of the board in $W$ is:
+        \[
+        p_{WB} = p_{WC} + R_{WC}\, p_{CB} = 
+        \begin{bmatrix} 0 \\ 0 \\ 0.3 \end{bmatrix} + 
+        \begin{bmatrix}
+        0 & 0 & 1 \\
+        0 & 1 & 0 \\
+        -1 & 0 & 0
+        \end{bmatrix}
+        \begin{bmatrix} 0 \\ 0.2 \\ 1.0 \end{bmatrix}
+        = \begin{bmatrix} 0 \\ 0 \\ 0.3 \end{bmatrix} + 
+        \begin{bmatrix} 1.0 \\ 0.2 \\ 0 \end{bmatrix}
+        = \begin{bmatrix} 1.0 \\ 0.2 \\ 0.3 \end{bmatrix}\,\text{m}
+        \]
+        
+        \textbf{Answer:} The position of the lower left corner of the calibration board (origin of frame $B$) in the world frame is:
+        \[
+        \boxed{p_{WB} = \begin{bmatrix} 1.0 \\ 0.2 \\ 0.3 \end{bmatrix}\,\text{m} = \begin{bmatrix} 100 \\ 20 \\ 30 \end{bmatrix}\,\text{cm}}
+        \]
+        
+        \item \textbf{Conversion between board frame and world frame.}
+        
+        We must find the homogeneous transformation matrix $T_{WB}$ that transforms coordinates from frame $B$ to frame $W$.
+        
+        \textbf{Step 1: Determine rotation $R_{CB}$ (from $B$ to $C$).}
+        
+        We are given two orientation constraints:
+        \begin{itemize}
+            \item The $y$ axis of $B$ points opposite to the $x$ axis of $C$: $\hat{y}_B = -\hat{x}_C$
+            \item The $z$ axis of $B$ is rotated $150^\circ$ about $\hat{y}_B$ relative to the $z$ axis of $C$
+        \end{itemize}
+        
+        First, express $\hat{y}_B$ in frame $C$:
+        \[
+        \hat{y}_B = \begin{bmatrix} -1 \\ 0 \\ 0 \end{bmatrix}_C
+        \]
+        
+        Next, $\hat{z}_B$ is obtained by rotating $\hat{z}_C = [0,0,1]^\top_C$ by $150^\circ$ about $\hat{y}_B = [-1,0,0]^\top_C$. Rotation about $[-1,0,0]^\top$ by $150^\circ$ is equivalent to rotation about $[1,0,0]^\top$ by $-150^\circ$:
+        \[
+        R_x(-150^\circ) = 
+        \begin{bmatrix}
+        1 & 0 & 0 \\
+        0 & \cos(-150^\circ) & -\sin(-150^\circ) \\
+        0 & \sin(-150^\circ) & \cos(-150^\circ)
+        \end{bmatrix}
+        = 
+        \begin{bmatrix}
+        1 & 0 & 0 \\
+        0 & -\frac{\sqrt{3}}{2} & \frac{1}{2} \\
+        0 & -\frac{1}{2} & -\frac{\sqrt{3}}{2}
+        \end{bmatrix}
+        \]
+        
+        Applying this to $\hat{z}_C$:
+        \[
+        \hat{z}_B = R_x(-150^\circ)\, \hat{z}_C = 
+        \begin{bmatrix}
+        1 & 0 & 0 \\
+        0 & -\frac{\sqrt{3}}{2} & \frac{1}{2} \\
+        0 & -\frac{1}{2} & -\frac{\sqrt{3}}{2}
+        \end{bmatrix}
+        \begin{bmatrix} 0 \\ 0 \\ 1 \end{bmatrix}
+        = \begin{bmatrix} 0 \\ \frac{1}{2} \\ -\frac{\sqrt{3}}{2} \end{bmatrix}_C
+        \]
+        
+        Using the right-hand rule to find $\hat{x}_B = \hat{y}_B \times \hat{z}_B$:
+        \[
+        \hat{x}_B = \begin{bmatrix} -1 \\ 0 \\ 0 \end{bmatrix} \times \begin{bmatrix} 0 \\ \frac{1}{2} \\ -\frac{\sqrt{3}}{2} \end{bmatrix}
+        = \begin{bmatrix} 0 \cdot (-\frac{\sqrt{3}}{2}) - 0 \cdot (-\frac{1}{2}) \\ 0 \cdot 0 - (-1) \cdot (-\frac{\sqrt{3}}{2}) \\ (-1) \cdot (-\frac{1}{2}) - 0 \cdot 0 \end{bmatrix}
+        = \begin{bmatrix} 0 \\ -\frac{\sqrt{3}}{2} \\ -\frac{1}{2} \end{bmatrix}_C
+        \]
+        
+        Therefore, the rotation matrix $R_{CB}$ (columns are $B$'s axes expressed in $C$) is:
+        \[
+        R_{CB} = \begin{bmatrix} \hat{x}_B & \hat{y}_B & \hat{z}_B \end{bmatrix}_C = 
+        \begin{bmatrix}
+        0 & -1 & 0 \\
+        -\frac{\sqrt{3}}{2} & 0 & \frac{1}{2} \\
+        -\frac{1}{2} & 0 & -\frac{\sqrt{3}}{2}
+        \end{bmatrix}
+        \]
+        
+        \textbf{Step 2: Compute rotation $R_{WB}$.}
+        
+        Using the chain rule for rotations: $R_{WB} = R_{WC}\, R_{CB}$
+        \[
+        R_{WB} = 
+        \begin{bmatrix}
+        0 & 0 & 1 \\
+        0 & 1 & 0 \\
+        -1 & 0 & 0
+        \end{bmatrix}
+        \begin{bmatrix}
+        0 & -1 & 0 \\
+        -\frac{\sqrt{3}}{2} & 0 & \frac{1}{2} \\
+        -\frac{1}{2} & 0 & -\frac{\sqrt{3}}{2}
+        \end{bmatrix}
+        = 
+        \begin{bmatrix}
+        -\frac{1}{2} & 0 & -\frac{\sqrt{3}}{2} \\
+        -\frac{\sqrt{3}}{2} & 0 & \frac{1}{2} \\
+        0 & 1 & 0
+        \end{bmatrix}
+        \]
+        
+        \textbf{Step 3: Homogeneous transformation matrix.}
+        
+        The homogeneous transformation matrix is:
+        \[
+        \boxed{T_{WB} = 
+        \begin{bmatrix}
+        -\frac{1}{2} & 0 & -\frac{\sqrt{3}}{2} & 1.0 \\[0.3em]
+        -\frac{\sqrt{3}}{2} & 0 & \frac{1}{2} & 0.2 \\[0.3em]
+        0 & 1 & 0 & 0.3 \\[0.3em]
+        0 & 0 & 0 & 1
+        \end{bmatrix}
+        \quad\text{or}\quad
+        T_{WB} = 
+        \begin{bmatrix}
+        -0.5 & 0 & -0.866 & 1.0 \\[0.3em]
+        -0.866 & 0 & 0.5 & 0.2 \\[0.3em]
+        0 & 1 & 0 & 0.3 \\[0.3em]
+        0 & 0 & 0 & 1
+        \end{bmatrix}}
+        \]
+        where the rotation block $R_{WB}$ captures the board's orientation and the translation vector $p_{WB}$ from part (a) specifies its position.
+        
+        \item \textbf{Finding the position of the robot.}
+        
+        We are given the following additional information:
+        \begin{itemize}
+            \item \textbf{Robot frame $R$ and view frame $V$}: Both have $\hat{x}$ facing the front of the robot and $\hat{z}$ facing upwards.
+            \item \textbf{Position of $V$ in $R$}: $p_{RV} = [10, 0, 4]^\top$ cm $= [0.1, 0, 0.04]^\top$ m.
+            \item \textbf{Orientation of $V$ relative to $B$}: The $\hat{z}_V$ (upwards) is parallel to $\hat{y}_B$, and $\hat{x}_V$ is rotated $(180 + a)^\circ$ from $\hat{z}_B$ about these vectors, where $a$ is the last digit of the SUID.
+            \item \textbf{Position of $B$ in $V$}: $p_{VB} = [70, 0, 22.6]^\top$ cm $= [0.7, 0, 0.226]^\top$ m.
+        \end{itemize}
+        
+        For this solution, I use $a = 1$ (last digit of my SUID 006952321).
+        
+        \textbf{Step 1: Determine rotation $R_{VB}$ (from $B$ to $V$).}
+        
+        Given that $\hat{z}_V$ is parallel to $\hat{y}_B$, we have $\hat{z}_V = \hat{y}_B$. 
+        
+        The constraint that $\hat{x}_V$ is rotated $(180 + a)^\circ = 181^\circ$ from $\hat{z}_B$ about the axis $\hat{z}_V = \hat{y}_B$ means:
+        \[
+        \hat{x}_V = R_y(181^\circ)\, \hat{z}_B
+        \]
+        where the rotation is about the $y$-axis of frame $B$.
+        
+        Using $\cos(181^\circ) \approx -0.9998$ and $\sin(181^\circ) \approx -0.0175$:
+        \[
+        R_y(181^\circ) = 
+        \begin{bmatrix}
+        \cos(181^\circ) & 0 & \sin(181^\circ) \\
+        0 & 1 & 0 \\
+        -\sin(181^\circ) & 0 & \cos(181^\circ)
+        \end{bmatrix}
+        \approx 
+        \begin{bmatrix}
+        -0.9998 & 0 & -0.0175 \\
+        0 & 1 & 0 \\
+        0.0175 & 0 & -0.9998
+        \end{bmatrix}
+        \]
+        
+        Therefore, $\hat{x}_V = R_y(181^\circ) \begin{bmatrix} 0 \\ 0 \\ 1 \end{bmatrix}_B \approx \begin{bmatrix} -0.0175 \\ 0 \\ -0.9998 \end{bmatrix}_B$
+        
+        With $\hat{y}_V = \hat{z}_V \times \hat{x}_V = \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}_B \times \begin{bmatrix} -0.0175 \\ 0 \\ -0.9998 \end{bmatrix}_B \approx \begin{bmatrix} -0.9998 \\ 0 \\ 0.0175 \end{bmatrix}_B$
+        
+        The rotation matrix $R_{VB}$ (columns are $B$'s axes in $V$) is:
+        \[
+        R_{VB} = \begin{bmatrix} \hat{x}_B & \hat{y}_B & \hat{z}_B \end{bmatrix}_V
+        = \begin{bmatrix}
+        -0.0175 & -0.9998 & 0 \\
+        0 & 0 & 1 \\
+        -0.9998 & 0.0175 & 0
+        \end{bmatrix}^\top
+        = \begin{bmatrix}
+        -0.0175 & 0 & -0.9998 \\
+        -0.9998 & 0 & 0.0175 \\
+        0 & 1 & 0
+        \end{bmatrix}
+        \]
+        
+        \textbf{Step 2: Compute $R_{WV}$ and $R_{WR}$.}
+        
+        Since $R$ and $V$ have the same orientation (both x forward, z up):
+        \[
+        R_{RV} = R_{VR} = I_{3\times 3}
+        \]
+        
+        Using $R_{WV} = R_{WB}\, R_{BV} = R_{WB}\, R_{VB}^\top$:
+        \[
+        R_{WV} = 
+        \begin{bmatrix}
+        -0.5 & 0 & -0.866 \\
+        -0.866 & 0 & 0.5 \\
+        0 & 1 & 0
+        \end{bmatrix}
+        \begin{bmatrix}
+        -0.0175 & -0.9998 & 0 \\
+        0 & 0 & 1 \\
+        -0.9998 & 0.0175 & 0
+        \end{bmatrix}
+        \approx 
+        \begin{bmatrix}
+        0.8746 & 0.4848 & 0 \\
+        -0.4848 & 0.8746 & 0 \\
+        0 & 0 & 1
+        \end{bmatrix}
+        \]
+        
+        Since $R_{WR} = R_{WV}$, we have the same rotation matrix for the robot.
+        
+        \textbf{Step 3: Find position $p_{WR}$.}
+        
+        Using the transformation chain:
+        \[
+        p_{WB} = p_{WR} + R_{WR}\, p_{RV} + R_{WV}\, p_{VB}
+        \]
+        
+        Rearranging:
+        \[
+        p_{WR} = p_{WB} - R_{WR}\, p_{RV} - R_{WV}\, p_{VB}
+        \]
+        
+        Since $R_{WR} = R_{WV}$:
+        \[
+        p_{WR} = p_{WB} - R_{WV}\, (p_{RV} + p_{VB})
+        \]
+        
+        Computing $p_{RV} + p_{VB} = \begin{bmatrix} 0.1 \\ 0 \\ 0.04 \end{bmatrix} + \begin{bmatrix} 0.7 \\ 0 \\ 0.226 \end{bmatrix} = \begin{bmatrix} 0.8 \\ 0 \\ 0.266 \end{bmatrix}$ m
+        
+        \[
+        R_{WV}\, (p_{RV} + p_{VB}) \approx 
+        \begin{bmatrix}
+        0.8746 & 0.4848 & 0 \\
+        -0.4848 & 0.8746 & 0 \\
+        0 & 0 & 1
+        \end{bmatrix}
+        \begin{bmatrix} 0.8 \\ 0 \\ 0.266 \end{bmatrix}
+        = 
+        \begin{bmatrix}
+        0.700 \\
+        -0.388 \\
+        0.266
+        \end{bmatrix}\,\text{m}
+        \]
+        
+        \[
+        p_{WR} = \begin{bmatrix} 1.0 \\ 0.2 \\ 0.3 \end{bmatrix} - \begin{bmatrix} 0.700 \\ -0.388 \\ 0.266 \end{bmatrix}
+        \approx \begin{bmatrix} 0.300 \\ 0.588 \\ 0.034 \end{bmatrix}\,\text{m}
+        \]
+        
+        \textbf{Answer:} With $a = 1$, the position of the robot (origin of frame $R$) in the world frame is:
+        \[
+        \boxed{p_{WR} \approx \begin{bmatrix} 0.300 \\ 0.588 \\ 0.034 \end{bmatrix}\,\text{m} = \begin{bmatrix} 30.0 \\ 58.8 \\ 3.4 \end{bmatrix}\,\text{cm}}
+        \]
+        
+        \item \textbf{Axis of wheel rotation.}
+        
+        \textbf{Answer:} \boxed{\text{Option 1: Vector } \hat{y} \text{ in coordinate frame } R}
+        
+        \item \textbf{Axis of robot movement.}
+        
+        \textbf{Answer:} \boxed{\text{Option 2: Vector } \hat{x} \text{ in coordinate frame } R}
     \end{enumerate}
 
 \newpage
 \section*{Problem 3}
-    \begin{enumerate}[label=(\roman*)]
-        \item  
-        \item
-        \item  
-        \item
-    \end{enumerate}
+    \subsection*{3a. Robust Line Fitting with RANSAC}
+        \subsubsection*{(i) Implementation and Results}
+        Using $N_{\text{iter}}=150$, $\epsilon=0.08$, and seed $274$, the RANSAC routine identified a dominant line with slope $\hat{m}=1.8921$ and intercept $\hat{b}=0.7693$. Twenty-six of the $100$ samples satisfied the inlier threshold, matching the green points in Fig.~\ref{fig:line-ransac}. The full implementation used to generate these values is provided in Appendix~\ref{appendix:c1-ransac}.
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.6\textwidth]{figures/line_ransac.png}
+            \caption{RANSAC line estimate highlighting inliers (green) and the best-fit line (red).}
+            \label{fig:line-ransac}
+        \end{figure}
+
+\subsection*{3b. Umeyama Point-Cloud Alignment}
+        \subsubsection*{(i) Estimated Transform}
+        Applying the closed-form Umeyama method (see Appendix~\ref{appendix:c2-umeyama}) yields
+        \[
+        R = \begin{bmatrix}
+            0.7676 & -0.0013 & 0.6409 \\
+            0.2347 & 0.9311 & -0.2791 \\
+            -0.5964 & 0.3647 & 0.7150
+        \end{bmatrix},\quad
+        t = \begin{bmatrix} 0.0195 \\ 0.0300 \\ -0.0107 \end{bmatrix}.
+        \]
+        \subsubsection*{(ii) Alignment Accuracy}
+        Transforming the source cloud with $(R, t)$ results in a root-mean-square error of $0.0653$\,m across all correspondences, confirming that the recovered transform nearly reproduces the noisy target.
+        \subsubsection*{(iii) Visualization}
+        Figure~\ref{fig:bunny-umeyama} contrasts the raw and aligned point clouds. After alignment, the transformed source overlaps the target in all three axes, while the pre-alignment view shows the original rotation and translation offsets.
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{figures/bunny_umeyama_alignment.png}
+            \caption{Umeyama alignment before (left) and after (right) applying $(R,t)$ to the Stanford bunny source cloud.}
+            \label{fig:bunny-umeyama}
+        \end{figure}
+\subsection*{3c. Robust Registration via RANSAC}
+        \subsubsection*{(i) Consensus Set}
+        With $s=3$, $N_{\text{iter}}=200$, $\tau=0.002$, and seed $274$, the RANSAC loop retained \textbf{$1635/8171$} correspondences as inliers.
+        \subsubsection*{(ii) Refit Transform and Accuracy}
+        Refitting Umeyama on the inliers produced the summary below:
+        \begin{itemize}
+            \item \textbf{Final rotation $\hat{R}$}
+            \[
+            \hat{R} = \begin{bmatrix}
+                0.7639 & -0.0110 & 0.6453 \\
+                0.2380 & 0.9342 & -0.2659 \\
+                -0.5999 & 0.3567 & 0.7162
+            \end{bmatrix}
+            \]
+            \item \textbf{Final translation $\hat{t}$}
+            \[
+            \hat{t} = \begin{bmatrix} 0.0200 \\ 0.0300 \\ -0.0100 \end{bmatrix}
+            \]
+            \item \textbf{Inlier RMSE}: $5.64\times10^{-17}$\,m (numerically zero within floating-point tolerance).
+        \end{itemize}
+        \subsubsection*{(iii) Visualization and Comparison}
+        Figure~\ref{fig:bunny-ransac} overlays the raw clouds and the aligned inlier set. The left panel shows the original source (blue) and target (orange) point clouds before alignment. The right panel displays the final result: aligned source inliers (green) and target inliers (red) overlap tightly, while rejected correspondences appear in grey.
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{figures/bunny_ransac_registration.png}
+            \caption{RANSAC registration. Left: original source (blue) and target (orange). Right: aligned source inliers (green) and target inliers (red); grey points denote rejected correspondences.}
+            \label{fig:bunny-ransac}
+        \end{figure}
+        
+        \textbf{Comparison to direct Umeyama:} The RANSAC-based registration substantially improves alignment quality compared to applying Umeyama to all correspondences directly. The global fit from part (b) achieved RMSE $= 0.0653$\,m and exhibits visible misalignment in Figure~\ref{fig:bunny-umeyama}, whereas the RANSAC-refined model reduces inlier RMSE to $5.64\times 10^{-17}$\,m (numerically zero) and produces near-perfect overlap in Figure~\ref{fig:bunny-ransac} by identifying and discarding $\sim$80\% of correspondences as outliers.
+
 
 \newpage
 \section*{Problem 4}
-    \begin{enumerate}[label=(\roman*)]
-        \item  
-        \item
-        \item  
-        \item
-    \end{enumerate}
-
-\newpage
-\section*{Problem 5 (Extra Credit)}
-    \begin{enumerate}[label=(\roman*)]
-        \item 
-        \item 
-        \item 
+    \begin{enumerate}[label=(\alph*)]
+        \item \textbf{Body-frame half-space formulation.}
+            \subsubsection*{(i) Scalar collision tests}
+            We express each face of the drone's bounding box as an independent half-space test on the query point $q_b = (q_{b,x}, q_{b,y})^\top$ expressed in the drone body frame. The rectangle spans $b_x$ along the body $x$-axis and $b_y$ along the body $y$-axis, so the four scalar inequalities are
+            \[
+                q_{b,x} - \frac{b_x}{2} \le 0,\quad
+                -q_{b,x} - \frac{b_x}{2} \le 0,\quad
+                q_{b,y} - \frac{b_y}{2} \le 0,\quad
+                -q_{b,y} - \frac{b_y}{2} \le 0.
+            \]
+            A collision occurs precisely when all four conditions are satisfied simultaneously.
+            
+            \subsubsection*{(ii) Matrix representation}
+            Stacking the scalar inequalities produces the requested matrix form $A q_b + b \le 0$ with
+            \[
+                A =
+                \begin{bmatrix}
+                    1 & 0 \\
+                    -1 & 0 \\
+                    0 & 1 \\
+                    0 & -1
+                \end{bmatrix},\qquad
+                b = -\frac{1}{2}
+                \begin{bmatrix}
+                    b_x \\
+                    b_x \\
+                    b_y \\
+                    b_y
+                \end{bmatrix}.
+            \]
+            These coefficients are exactly those used inside the collision checker for the RRT implementation; the helper sourcing this computation is exported in Appendix~\ref{appendix:d1-collision}.
+        \item \textbf{World-to-body transformation.}
+            \subsubsection*{(i) Translation vector $\tau$}
+            The pose $x = (x, y, \theta)^\top$ centres the body frame at the drone's geometric centre, so obstacle points are first shifted by
+            \[
+                \tau = \begin{bmatrix} x \\ y \end{bmatrix}.
+            \]
+            This translation enforces $q - \tau$ as the world-frame displacement from the body origin.
+            
+            \subsubsection*{(ii) Rotation matrix $R$}
+            A positive $\theta$ corresponds to a counter-clockwise rotation, yielding the standard planar rotation matrix
+            \[
+                R = \begin{bmatrix}
+                    \cos\theta & -\sin\theta \\
+                    \sin\theta & \cos\theta
+                \end{bmatrix}.
+            \]
+            Applying $R$ rotates vectors about the origin of $B$ by $\theta$.
+            
+            \subsubsection*{(iii) Transforming obstacle points}
+            Combining the translation and rotation gives $q_b = R^\top (q - \tau)$ for any obstacle $q \in \mathbb{R}^2$. The code implementation of $\tau$ and $R$ appears in Appendix~\ref{appendix:d2-transform}.
+        \item \textbf{World-frame inequality.}
+            Substituting $q_b = R^\top(q - \tau)$ from part (b) into the body-frame inequality $A q_b + b \le 0$ from part (a) yields
+            \[
+                A R^\top (q - \tau) + b \le 0 \quad\Longrightarrow\quad
+                \underbrace{A R^\top}_{A_W} q + \underbrace{\Bigl(b - A R^\top \tau\Bigr)}_{b_W} \le 0.
+            \]
+            This gives the world-frame collision test $A_W q + b_W \le 0$, where:
+            \[
+                A_W = A R^\top \in \mathbb{R}^{4 \times 2}, \qquad b_W = b - A_W \tau \in \mathbb{R}^4.
+            \]
+            The matrix $A_W$ rotates each half-space normal into the world frame, while $b_W$ shifts the offsets to account for the drone's translation. The code implementation of this computation appears in Appendix~\ref{appendix:d3-world}.
+            
+        \item \textbf{RRT implementation and evaluation.}
+            The \texttt{is\_free\_state} method of the \texttt{MidtermRRT} class in \texttt{P4\_rrt.py} was completed to implement the collision detection logic derived in parts (a)--(c). Given a pose $(x, y, \theta)$ and obstacle point cloud, the method computes translation $\tau = [x, y]^\top$ and rotation matrix $R$ (part b), constructs body-frame matrices $A$ and $b$ (part a), transforms them to world coordinates as $A_W = A R^\top$ and $b_W = b - A_W \tau$ (part c), then evaluates $A_W q + b_W \le 0$ for each obstacle point. If all four inequalities are satisfied for any point, a collision is detected and the method returns \texttt{False}. The complete implementation is provided in Appendix~\ref{appendix:d1-collision}.
+            
+            With \texttt{is\_free\_state} completed, the notebook \texttt{midterm\_p4\_rrt.ipynb} was executed to test the collision-aware RRT planner on three different obstacle maps. The notebook cells were run sequentially, generating the exploration trees and solution paths shown in Figures~\ref{fig:rrt-cluster}--\ref{fig:rrt-level43}. Detailed interpretations of each map's results follow.
+            
+            \subsubsection*{Map 1: Cluster maze}
+            The first map contains dense clusters of obstacles. The RRT was configured with step size $\epsilon = 10$\,px and a $20\times10$\,px bounding box for the drone. Starting from $(10, 20)$ with initial heading $\pi/4$ and targeting $(100, 90)$ with heading $\pi/6$, the planner successfully finds a collision-free path containing $19$ nodes (Fig.~\ref{fig:rrt-cluster}). 
+            
+            The blue tree shows the exploration process, revealing how the RRT grows toward the goal while avoiding obstacle clusters. The green path represents the final solution extracted by backtracking from the goal node. The collision checker effectively prevents the rotated rectangle from intersecting any obstacle points, confirming that the world-frame inequality $A_W q + b_W \le 0$ correctly accounts for both translation and rotation of the drone body.
+            
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=0.75\textwidth]{figures/rrt_cluster.png}
+                \caption{Cluster maze: the RRT (blue tree, green solution) navigates between obstacle clusters without intersecting any sampled points.}
+                \label{fig:rrt-cluster}
+            \end{figure}
+            
+            \subsubsection*{Map 2: Narrow-gap maze}
+            The second map features a challenging narrow corridor that tests the planner's ability to navigate tight spaces. The drone footprint was reduced to $10\times5$\,px and the step size decreased to $\epsilon = 5$\,px to enable finer-grained exploration. Starting from $(20, 30)$ with heading $-\pi/6$ and targeting $(90, 25)$ with heading $0$, the planner discovers a $31$-node solution that threads through the gap (Fig.~\ref{fig:rrt-gap}).
+            
+            This result demonstrates the critical importance of the orientation-aware collision detection implemented in \texttt{is\_free\_state}. The planner must carefully adjust the drone's heading $\theta$ to align the rectangular body with the corridor opening. The world-frame collision test $A_W q + b_W \le 0$ properly accounts for this rotation via the matrix $A_W = A R^\top$, allowing the planner to find configurations where the rotated rectangle clears the walls. Without this capability, a point-mass planner would incorrectly assume the gap is traversable, leading to collisions when the drone's physical extent is considered.
+            
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=0.75\textwidth]{figures/rrt_gap.png}
+                \caption{Gap maze: the planner discovers an orientation-aware path that clears the narrow opening.}
+                \label{fig:rrt-gap}
+            \end{figure}
+            
+            \subsubsection*{Map 3: Super Mario Land Level 4-3}
+            The third map is a large-scale test inspired by Super Mario Land Level~4-3, containing $3{,}110$ obstacle points extracted from the classic Game Boy level. Despite the dense environment, the RRT with drone dimensions $15\times12$\,px and step size $\epsilon = 10$\,px successfully plans a $53$-node path from Mario's starting position $(183, 37)$ to Princess Daisy at $(545, 59)$ (Fig.~\ref{fig:rrt-level43}).
+            
+            This result validates the computational efficiency of the world-frame collision checking approach. Rather than transforming all $3{,}110$ obstacle points into the body frame for each candidate pose, the implementation precomputes $A_W = A R^\top$ and $b_W = b - A_W \tau$ once per pose, then performs only matrix-vector multiplications $A_W q$ for each obstacle point. This vectorized approach keeps the collision detection tractable even for large point clouds, enabling real-time planning in environments with thousands of obstacles. The successful path shown in the figure demonstrates that the half-space formulation from parts (a)--(c) scales effectively to practical robotics applications.
+            
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=0.85\textwidth]{figures/rrt_level43.png}
+                \caption{Super Mario Land Level 4-3 inspired map: the RRT weaves past dense obstacles to reach Daisy safely.}
+                \label{fig:rrt-level43}
+            \end{figure}
     \end{enumerate}
 
 
 %%%%%%%%%%%%%%%%%% TEMPLATE FOR CODE SUBMISSION %%%%%%%%%%%%%%%%%%
 \newpage
-\section*{Appendix A: Planar Quadrotor Dynamics Listing}
-    \label{appendix:problem1a-code}
+\appendix
+\section{Problem 1 Details}
+    \label{appendix:problem1-details}
+
+    \subsection{1a. Planar Quadrotor Dynamics Listing}
+    \label{appendix:a1-dynamics}
     \lstinputlisting[language=Python]{problem1a_dynamics.py}
 
-%%%%%%%%%%%%%%%%%% TEMPLATE FOR IMAGE SUBMISSION %%%%%%%%%%%%%%%%%%
-\section*{Appendix B: Image Submission Template}
-    \begin{figure}[h]
+    \subsection{1b. Running Cost Helper}
+    \label{appendix:a2-running-cost}
+    \lstinputlisting[language=Python]{problem1b_running_cost.py}
+
+    \subsection{1c. Continuous and Discrete Jacobians}
+    \label{appendix:ac1-jacobians}
+    Differentiating each component of $f_c(x,u)$ with respect to $x$ and $u$ yields the matrices $A_c$ and $B_c$ used for first-order linearization. Applying forward Euler gives $A_t = I + \Delta t\,A_c$ and $B_t = \Delta t\,B_c$, which are exported below for exact reuse in the controllers.
+    \lstinputlisting[language=Python]{problem1c_continuous_jacobians.py}
+    \lstinputlisting[language=Python]{problem1c_discrete_jacobians.py}
+
+    \subsection{1c.2 Affine Linearization Form}
+    \label{appendix:ac2-affine}
+    Starting from $f_d(x,u) = x + \Delta t\,f_c(x,u)$, a first-order Taylor expansion about $(x_t^{\text{ref}},u_t^{\text{ref}})$ produces
+    \[
+        x_{t+1} \approx f_d(x_t^{\text{ref}},u_t^{\text{ref}}) + A_t\,(x_t - x_t^{\text{ref}}) + B_t\,(u_t - u_t^{\text{ref}}),
+    \]
+    with $A_t$ and $B_t$ defined as in Appendix~\ref{appendix:ac1-jacobians}. Rearranging gives the deviation dynamics $\delta x_{t+1}=A_t\,\delta x_t+B_t\,\delta u_t$ used in both iLQR and GS-LQR.
+
+    \subsection{1c.3 Linearization Helper}
+    \label{appendix:ac3-linearize}
+    The \texttt{linearize\_about} helper wraps the analytic Jacobians, returning the affine model coefficients and the nominal next state for any reference pair $(x_t^{\text{ref}},u_t^{\text{ref}})$.
+    \lstinputlisting[language=Python]{problem1c_linearize.py}
+
+%%%%%%%%%%%%%%%%%% BASELINE CONTROLLER RESULTS (r_T = 0.001) %%%%%%%%%%%%%%%%%%
+    \subsection{1d.1 Baseline Controller Results ($r_T = 0.001$)}
+    \label{appendix:a-figures}
+    
+    \begin{figure}[H]
         \centering
-        \includegraphics[width=0.5\textwidth]{figs/example_image.jpg}
-        \caption{INSERT CAPTION HERE}
-        \label{fig:placeholder}
+        \includegraphics[width=0.85\textwidth]{figures/ilqr_trajectory.png}
+        \caption{iLQR trajectory on real-world dynamics. The roll angle monotonically decreases to $-270^\circ$, and thrusts exhibit violent oscillations (reaching $20\,\text{N}$) in the first $0.5\,\text{s}$ before settling to constant values. The trajectory diverges to $(20\,\text{m}, -16\,\text{m})$, indicating catastrophic failure of the open-loop control sequence under model mismatch.}
+        \label{fig:ilqr-trajectory}
     \end{figure}
     
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{figures/ilqr_cost.png}
+        \caption{iLQR cost convergence during the planning phase. The algorithm converges to a locally optimal solution within $\sim$10 iterations under the nominal model.}
+        \label{fig:ilqr-cost}
+    \end{figure}
     
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.85\textwidth]{figures/gslqr_trajectory.png}
+        \caption{GS-LQR trajectory on real-world dynamics. Roll angle shows initial transients (dip to $-45^\circ$, peak at $+30^\circ$) before stabilizing near $0^\circ$. Thrusts exhibit initial spikes up to $10\,\text{N}$ with one rotor briefly near $0\,\text{N}$, then recover to hover values by $t=1\,\text{s}$. The trajectory successfully reaches $(1.5\,\text{m}, 1.0\,\text{m})$, demonstrating stable closed-loop tracking despite model errors.}
+        \label{fig:gslqr-trajectory}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.65\textwidth]{figures/planar_comparison.png}
+        \caption{Planar trajectory comparison. GS-LQR (blue) successfully reaches the goal at $(1.5, 1.0)\,\text{m}$, while iLQR (red) diverges catastrophically to $(20, -16)\,\text{m}$ due to accumulated model errors in open-loop execution.}
+        \label{fig:planar-comparison}
+    \end{figure}
+
+%%%%%%%%%%%%%%%%%% HIGH CONTROL WEIGHT RESULTS (r_T = 0.01) %%%%%%%%%%%%%%%%%%
+    \subsection{1d.2 Increased Control Weight Results ($r_T = 0.01$)}
+    \label{appendix:a-figures-highrt}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.85\textwidth]{figures/ilqr_trajectory_highrt.png}
+        \caption{iLQR trajectory with $r_T = 0.01$. The trajectory is nearly identical to the baseline case, diverging to $(20\,\text{m}, -16\,\text{m})$ with roll angle reaching $-270^\circ$. The thrust transients differ slightly (T2 spikes to $20\,\text{N}$ instead of T1), but the catastrophic failure persists, demonstrating that control penalty tuning cannot compensate for lack of feedback under model mismatch.}
+        \label{fig:ilqr-highrt}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{figures/ilqr_cost_highrt.png}
+        \caption{iLQR cost convergence with increased control penalty. The final cost is higher due to the increased weight on control effort.}
+        \label{fig:ilqr-cost-highrt}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.85\textwidth]{figures/gslqr_trajectory_highrt.png}
+        \caption{GS-LQR trajectory with $r_T = 0.01$. The trajectory is nearly indistinguishable from the baseline case, successfully reaching $(1.5\,\text{m}, 1.0\,\text{m})$ with similar transient behavior (dip to $-40^\circ$, peak at $+30^\circ$) and thrust profiles. The minimal change demonstrates that feedback control naturally operates efficiently, making the system insensitive to control penalty tuning.}
+        \label{fig:gslqr-highrt}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.65\textwidth]{figures/planar_comparison_highrt.png}
+        \caption{Planar trajectory comparison with increased control weight ($r_T = 0.01$). The trajectories are visually identical to the baseline case: iLQR (red) diverges to $(20\,\text{m}, -16\,\text{m})$ while GS-LQR (blue) reaches the goal at $(1.5\,\text{m}, 1.0\,\text{m})$. The insensitivity to the tenfold increase in control penalty confirms that feedback robustness, not parameter tuning, determines performance under model mismatch.}
+        \label{fig:planar-highrt}
+    \end{figure}
+
+    \section{Problem 3 Details}
+    \subsection{3a. RANSAC Line Implementation}
+    \label{appendix:c1-ransac}
+    The RANSAC estimator samples point pairs to hypothesize $y=mx+b$, scores them with the $\epsilon=0.08$ inlier threshold, and refines the winning model with a least-squares fit over the inliers.
+    \lstinputlisting[language=Python]{problem3a_ransac_line.py}
+    \subsection{3b. Umeyama Alignment Implementation}
+    \label{appendix:c2-umeyama}
+    The Umeyama routine computes centroids, factors the cross-covariance with SVD, enforces a proper rotation, and recovers the translation before returning $(R, t)$.
+    \lstinputlisting[language=Python]{problem3b_umeyama.py}
+    \subsection{3c. RANSAC Registration Implementation}
+    \label{appendix:c3-ransac}
+    The RANSAC wrapper samples minimal triples, filters degenerate sets, evaluates consensus with the Umeyama inner solver, and refits on the best inliers.
+    \lstinputlisting[language=Python]{problem3c_ransac_umeyama.py}
+
+    \section{Problem 4 Details}
+    \subsection{4d. Complete \texttt{is\_free\_state} Implementation}
+    \label{appendix:d1-collision}
+    The complete \texttt{is\_free\_state} method from the \texttt{MidtermRRT} class in \texttt{P4\_rrt.py} (Problem 4d) implements the collision detection logic derived in parts (a)--(c). The method extracts the translation vector $\tau$ and angle $\theta$ from the pose, constructs the rotation matrix $R$ (lines 11--14), defines the body-frame half-space matrices $A$ and $b$ (lines 16--32), transforms them to the world frame as $A_W = A R^\top$ and $b_W = b - A_W \tau$ (lines 34--36), then evaluates $A_W q + b_W \le 0$ for each obstacle point (lines 38--41), short-circuiting once a collision is detected.
+    \lstinputlisting[language=Python]{problem4a_is_free_state.py}
+    \subsection{4b. Frame Transform Computation}
+    \label{appendix:d2-transform}
+    The excerpt highlighted here shows the translation and rotation definitions together with the world-to-body transform $q_b = R^\top (q - \tau)$ used in the collision test.
+    \lstinputlisting[language=Python, firstline=5, lastline=14]{problem4a_is_free_state.py}
+    \subsection{4c. World-Frame Inequality}
+    \label{appendix:d3-world}
+    This segment pre-multiplies the rotation and translation to form $A_W$ and $b_W$, enabling direct evaluation of the inequality $A_W q + b_W \le 0$ in world coordinates.
+    \lstinputlisting[language=Python, firstline=16, lastline=36]{problem4a_is_free_state.py}
 
 \end{document}

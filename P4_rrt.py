@@ -193,13 +193,38 @@ class MidtermRRT(RRT):
         # Hint: If one of the points in the point cloud is contained in the drone body, return False immediately; you don't need to check the rest.
         
         # Rotation matrix
-        R = None
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, -s],
+                      [s,  c]])
 
         # Matrix A defining the planes of the rectangle boundaries
-        A = None
+        A = np.array([
+            [1.0, 0.0],
+            [-1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+        ])
 
         # b defining distance to the planes
-        b = None
+        half_width = 0.5 * bx
+        half_height = 0.5 * by
+        b = np.array([
+            -half_width,
+            -half_width,
+            -half_height,
+            -half_height,
+        ])
+
+        R_world_to_body = R.T
+        A_world = A @ R_world_to_body
+        b_world = b.reshape(-1, 1) - A_world @ tau
+
+        for point in obstacle_cloud:
+            q_world = point.reshape(2, 1)
+            if np.all(A_world @ q_world + b_world <= 0):
+                return False
+        
+        return True
         
         ########## Code ends here ##########
 
