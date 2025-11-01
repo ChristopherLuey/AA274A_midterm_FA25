@@ -1,0 +1,109 @@
+\documentclass [11pt]{article}
+\usepackage{longtable}
+\usepackage{amsmath,float,epsfig,amssymb,graphicx}
+\usepackage{fancyhdr,subfigure}
+\usepackage{epstopdf}
+\usepackage[colorlinks=true, urlcolor=blue]{hyperref}
+\usepackage{titlesec}
+\usepackage{color,soul}
+\setcounter{secnumdepth}{3}
+\usepackage{gensymb}
+\usepackage{pdfpages}
+\usepackage{listings}
+\usepackage{enumitem}
+
+
+%This commands adjust the space left for the margins
+\addtolength{\oddsidemargin}{-1.0in}
+\addtolength{\textwidth}{2.0in}
+\addtolength{\voffset}{-0.75in}
+\addtolength{\headsep}{5pt}
+\addtolength{\textheight}{1.25in}
+\setlength{\headheight}{14pt}
+
+%Author & Project/Homework names
+\newcommand{\authorname}{[First Name] [Last Name]}
+\newcommand{\datenumber}{10/30/24}
+\newcommand{\assignmentID}{Midterm 2024}
+\newcommand{\coursename}{Principles of Robot Autonomy I: }
+
+%%%%%%%%%%%%%%%%%% DOCUMENT HEADER & TITLE %%%%%%%%%%%%%%%%%%
+\fancyhead{}
+\fancyhead[C]{\large \coursename \assignmentID \ | \datenumber \ | \authorname}
+
+\begin{document}
+\pagestyle{fancy}
+
+\begin{center}
+    \Large \textbf{\coursename \assignmentID}\\
+    \small \authorname\\
+    \small \datenumber
+\end{center}
+
+%%%%%%%%%%%%%%%% EXAM %%%%%%%%%%%%%%%%%%%%
+
+\section*{Problem 1}
+    \begin{enumerate}[label=(\roman*)]
+        \item \textbf{Planar Quadrotor Dynamics Implementation}\\
+        I completed the continuous-time state transition function $f_{c}(x,u)$ in the notebook cell reserved for Part~1a by encoding the six coupled first-order differential equations shown in the problem statement. The state vector $x=[p_x,\,v_x,\,p_y,\,v_y,\,\phi,\,\omega]^\top$ and control input $u=[T_1,\,T_2]^\top$ are unpacked explicitly so that each term in the dynamics can be constructed directly from the physical parameters already defined in the notebook. The implementation forms the total thrust $T_1+T_2$ once (stored in `thrust_sum`) to reuse in both translational accelerations. The derivatives are then populated component-wise inside a NumPy array that matches the input state dimensionality: position rates are set to the corresponding velocities ($\dot{p}_x=v_x$ and $\dot{p}_y=v_y$), the horizontal acceleration is $-\frac{T_1+T_2}{m}\sin\phi$, the vertical acceleration is $\frac{T_1+T_2}{m}\cos\phi-g$, the attitude rate is the body rate $\omega$, and the angular acceleration is $\frac{(T_2-T_1)\ell}{I_{zz}}$. Creating the derivative vector this way guarantees numerical consistency with the notebook's vectorized operations and keeps the implementation aligned with the provided constants $m$, $g$, $\ell$, and $I_{zz}$.
+
+        Building on $f_{c}$, the discrete-time update $f_{d}(x,u,\Delta t)$ applies the forward-Euler integration rule requested in the prompt. Rather than duplicating any physics, the code simply returns $x + \Delta t \cdot f_{c}(x,u)$ so that it automatically stays synchronized with any future refinement of the continuous model and respects the default step size $\Delta t=0.02$\,s supplied by `dt_default`. I verified that the function retains the input shape and supports arbitrary user-specified time steps through the optional `dt` parameter. The exact code used to implement both functions is reproduced verbatim in Appendix~\ref{appendix:problem1a-code}, where it is automatically exported from the notebook to avoid transcription errors.
+        \item
+        \item
+    \end{enumerate}
+
+\newpage
+\section*{Problem 2}
+    \begin{enumerate}[label=(\roman*)]
+        \item  
+        \item
+        \item  
+        \item
+        \item 
+    \end{enumerate}
+
+\newpage
+\section*{Problem 3}
+    \begin{enumerate}[label=(\roman*)]
+        \item  
+        \item
+        \item  
+        \item
+    \end{enumerate}
+
+\newpage
+\section*{Problem 4}
+    \begin{enumerate}[label=(\roman*)]
+        \item  
+        \item
+        \item  
+        \item
+    \end{enumerate}
+
+\newpage
+\section*{Problem 5 (Extra Credit)}
+    \begin{enumerate}[label=(\roman*)]
+        \item 
+        \item 
+        \item 
+    \end{enumerate}
+
+
+%%%%%%%%%%%%%%%%%% TEMPLATE FOR CODE SUBMISSION %%%%%%%%%%%%%%%%%%
+\newpage
+\section*{Appendix A: Planar Quadrotor Dynamics Listing}
+    \label{appendix:problem1a-code}
+    \lstinputlisting[language=Python]{problem1a_dynamics.py}
+
+%%%%%%%%%%%%%%%%%% TEMPLATE FOR IMAGE SUBMISSION %%%%%%%%%%%%%%%%%%
+\section*{Appendix B: Image Submission Template}
+    \begin{figure}[h]
+        \centering
+        \includegraphics[width=0.5\textwidth]{figs/example_image.jpg}
+        \caption{INSERT CAPTION HERE}
+        \label{fig:placeholder}
+    \end{figure}
+    
+    
+
+\end{document}
